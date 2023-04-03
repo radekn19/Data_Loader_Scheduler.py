@@ -7,12 +7,11 @@ from multiprocessing.pool import ThreadPool as Pool
 import xml.etree.ElementTree as ET
 import copy
 
-
 # Configuration to fill in
 # ---------------------------------
 csvPath = r"D:\Salesforce\DL_Command\v57.0.1\bin\DL_command\File\Test\Nowy dokument tekstowy.csv"
 # Number of records in file - used during slitting the csv file
-fileBatch = 1
+fileBatch = 5
 
 processBat = r"D:\Salesforce\DL_Command\v57.0.1\bin\process.bat"
 configPath = r'D:\Salesforce\DL_Command\v57.0.1\bin\DL_command'
@@ -21,10 +20,12 @@ interfacesList = ['accountUpsert', 'accountUpsert1']
 # Interval given in seconds
 interval = 3
 
+csv_files = []
+
 
 # ---------------------------------
 def get_file_path():
-    return csvPath[:csvPath.rfind("\\")]
+    return csvPath[:csvPath.rfind("\\")] + "\\"
 
 
 def get_formatted_time_now():
@@ -40,6 +41,8 @@ def slit_csv_file(file_path, batch_size):
     try:
         for i, chunk in enumerate(pd.read_csv(file_path, chunksize=fileBatch)):
             chunk.to_csv(get_file_path() + csvConvertedName.format(i), index=False)
+            csv_files.append(csvConvertedName.format(i)[1:])
+            print(csvConvertedName.format(i)[1:])
     except Exception as e:
         print("Error -  splitting file")
         logging.error("Error while splitting file %s", file_path)
@@ -51,21 +54,44 @@ def slit_csv_file(file_path, batch_size):
     logging.info("Stop splitting the '%s' file", csvName)
 
 
-def get_dl_config_for_file(config_xml):
-    logging.info("Start preparing the Config XML file: '%s'", config_xml + "\\process-conf.xml")
-    print("Start preparing the Config XML file: " + config_xml + "\\process-conf.xml")
-    tree = ET.parse(config_xml + "\\process-conf.xml")
-    root = tree.getroot()
-    bean = tree.find("bean")
+def prepare_dl_config(config_xml_path, csv_files_list):
+    logging.info("Start preparing the config.xml file based on: '%s'", config_xml_path + "\\process-conf.xml")
+    print("Start preparing the config.xml file based on: " + config_xml_path + "\\process-conf.xml")
+    try:
+        newConfigXmlPath = get_file_path() + "config.xml"
+        tree = ET.parse(config_xml_path + "\\process-conf.xml")
+        root = tree.getroot()
+        beanRoot = root.find('bean')
 
-    beanCopy = copy.deepcopy(bean)
-    root.append(beanCopy)
+        i = 0
+        for file_l in csv_files_list:
+            beanLoop = copy.deepcopy(beanRoot)
+            print(file_l)
+            if i == 0:
+                root.find("./bean[@class='com.salesforce.dataloader.process.ProcessRunner']").attrib["id"] = file_l
+                root.find("./bean/property/map/entry[@key='dataAccess.name']").attrib["value"] = get_file_path() + file_l
+            else:
+                beanLoop.find(".[@class='com.salesforce.dataloader.process.ProcessRunner']").attrib["id"] = file_l
+                beanLoop.find("./property/map/entry[@key='dataAccess.name']").attrib["value"] = get_file_path() + file_l
+                root.append(beanLoop)
 
-    # Write to new config.xml file to location where is csv file
-    xmlPath = get_file_path() + "\\config.xml"
-    print(xmlPath)
-    with open(xmlPath, "wb") as f:
-        f.write(ET.tostring(root))
+            i += 1
+
+        # Write to new config.xml file to location where is csv file
+        with open(newConfigXmlPath, "wb") as f:
+            f.write(ET.tostring(root))
+    except Exception as e:
+        print("Error -  preparing the config.xml file")
+        logging.error("Error while preparing the config.xml file: %s based on %s\\process-conf.xml", newConfigXmlPath,
+                      config_xml_path)
+        logging.error(e)
+        logging.critical("Program closed")
+        raise SystemExit
+
+    logging.info("Stop - config.xml file created with '%s' beans - '%s'", i, newConfigXmlPath)
+    print("Stop - config.xml file created with beans: " + str(i))
+
+
 
 
 # RUN Data Loader with subprocess function
@@ -81,14 +107,14 @@ def run_dataLoader_process(interfaces, loop):
 
 # ------------------------------------------------------------------------------------------------------------
 # START
-logging.basicConfig(filename=get_file_path() + "\\log.txt", format="%(asctime)s - %(levelname)s - %(message)s",
+logging.basicConfig(filename=get_file_path() + "log.txt", format="%(asctime)s - %(levelname)s - %(message)s",
                     level=logging.INFO)
 
 # Split CSV File
 slit_csv_file(csvPath, fileBatch)
 
 # Prepare the config with beans
-get_dl_config_for_file(configPath)
+prepare_dl_config(configPath, csv_files)
 
 # RUN Data Loader at specified intervals and in separate processes
 pool = Pool(5)
