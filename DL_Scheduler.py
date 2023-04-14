@@ -9,16 +9,14 @@ import copy
 
 # Configuration to fill in
 # ---------------------------------
-csvPath = r"D:\Salesforce\DL_Command\v57.0.1\bin\DL_command\File\Test\Nowy dokument tekstowy.csv"
+processBat = r"D:\Salesforce\DL_Command\v57.0.1\bin\process.bat"
+configPath = r"D:\Salesforce\DL_Command\v57.0.1\bin\DL_command"
+csvPath = r"D:\Salesforce\DL_Command\v57.0.1\bin\DL_command\File\Test\Nowy_dokument_tekstowy.csv"
+
 # Number of records in file - used during slitting the csv file
 fileBatch = 5
-
-processBat = r"D:\Salesforce\DL_Command\v57.0.1\bin\process.bat"
-configPath = r'D:\Salesforce\DL_Command\v57.0.1\bin\DL_command'
-interfacesList = ['accountUpsert', 'accountUpsert1']
-
 # Interval given in seconds
-interval = 3
+interval = 1
 
 csv_files = []
 
@@ -55,10 +53,14 @@ def slit_csv_file(file_path, batch_size):
 
 
 def prepare_dl_config(config_xml_path, csv_files_list):
-    logging.info("Start preparing the config.xml file based on: '%s'", config_xml_path + "\\process-conf.xml")
-    print("Start preparing the config.xml file based on: " + config_xml_path + "\\process-conf.xml")
+    newConfigXmlPath = get_file_path() + "process-conf.xml"
+    declaration = '<!DOCTYPE beans PUBLIC "-//SPRING//DTD BEAN//EN" "http://www.springframework.org/' \
+                  'dtd/spring-beans.dtd">\n'
+
     try:
-        newConfigXmlPath = get_file_path() + "config.xml"
+        logging.info("Start preparing the config.xml file based on: '%s'", config_xml_path + "\\process-conf.xml")
+        print("Start preparing the config.xml file based on: " + config_xml_path + "\\process-conf.xml")
+
         tree = ET.parse(config_xml_path + "\\process-conf.xml")
         root = tree.getroot()
         beanRoot = root.find('bean')
@@ -69,17 +71,22 @@ def prepare_dl_config(config_xml_path, csv_files_list):
             print(file_l)
             if i == 0:
                 root.find("./bean[@class='com.salesforce.dataloader.process.ProcessRunner']").attrib["id"] = file_l
-                root.find("./bean/property/map/entry[@key='dataAccess.name']").attrib["value"] = get_file_path() + file_l
+                root.find("./bean/property/map/entry[@key='dataAccess.name']").attrib[
+                    "value"] = get_file_path() + file_l
             else:
                 beanLoop.find(".[@class='com.salesforce.dataloader.process.ProcessRunner']").attrib["id"] = file_l
                 beanLoop.find("./property/map/entry[@key='dataAccess.name']").attrib["value"] = get_file_path() + file_l
                 root.append(beanLoop)
 
             i += 1
-
         # Write to new config.xml file to location where is csv file
         with open(newConfigXmlPath, "wb") as f:
+            f.write(declaration.encode())
             f.write(ET.tostring(root))
+
+        logging.info("Stop - config.xml file created with '%s' beans - '%s'", i, newConfigXmlPath)
+        print("Stop - config.xml file created with beans: " + str(i))
+
     except Exception as e:
         print("Error -  preparing the config.xml file")
         logging.error("Error while preparing the config.xml file: %s based on %s\\process-conf.xml", newConfigXmlPath,
@@ -88,19 +95,14 @@ def prepare_dl_config(config_xml_path, csv_files_list):
         logging.critical("Program closed")
         raise SystemExit
 
-    logging.info("Stop - config.xml file created with '%s' beans - '%s'", i, newConfigXmlPath)
-    print("Stop - config.xml file created with beans: " + str(i))
-
-
-
 
 # RUN Data Loader with subprocess function
 def run_dataLoader_process(interfaces, loop):
     print(get_formatted_time_now() + " - START loop " + str(
         loop) + ", interface" + interfaces)
-    print(configPath)
-    # subprocess.run(processBat + ' ' + config + ' ' + interfaces)
-    # time.sleep(2)
+    print(processBat + ' ' + get_file_path()[:-1] + ' ' + interfaces)
+    subprocess.run(processBat + ' ' + get_file_path()[:-1] + ' ' + interfaces)
+    time.sleep(15)
     print(get_formatted_time_now() + " - STOP loop " + str(
         loop) + ", interface" + interfaces)
 
@@ -119,10 +121,10 @@ prepare_dl_config(configPath, csv_files)
 # RUN Data Loader at specified intervals and in separate processes
 pool = Pool(5)
 loopRun = 1
-for interface in interfacesList:
+for interface in csv_files:
     if loopRun != 1:
         time.sleep(interval)
-    # result = pool.apply_async(run_dataLoader_process, (interface, loopRun))
+    result = pool.apply_async(run_dataLoader_process, (interface, loopRun))
     loopRun += 1
 
 pool.close()
